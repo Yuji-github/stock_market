@@ -48,4 +48,4 @@ COPY src /app/src
 USER appuser
 
 # Entry point
-CMD ["python", "src/app.py"]
+CMD ["python", "src/main.py"]
