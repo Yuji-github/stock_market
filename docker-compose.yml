@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  app:
+    # This tells Compose to look for the Dockerfile in the current directory (.)
+    build: . 
+    container_name: prod_deploy
+    ports:
+      - "8050:8050"
+    restart: always
+    # This injects the file's contents into the container at runtime
+    env_file:
+      - .env
