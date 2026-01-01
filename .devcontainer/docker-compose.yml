@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  dev:  # must match with service in devcontainer.json
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile.dev
+      args:
+        USERNAME: vscode
+    
+    # Mount the root of the project to /workspace
+    volumes:
+      - ../:/workspace:cached
+      
+    # Overwrite the default command so the container stays running
+    command: /bin/sh -c "while sleep 1000; do :; done"
+      
+    # Set the working directory
+    working_dir: /workspace
+

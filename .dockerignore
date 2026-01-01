@@ -1,0 +1,27 @@
+# .dockerignore to prevent secrets in the production image
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.git
+.gitignore
+.mypy_cache
+.pytest_cache
+.devcontainer
+.vscode
+.env
+README.md

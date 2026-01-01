@@ -1,0 +1,22 @@
+{
+    "name": "Dev (Python)",  // Change this for each project
+    "dockerComposeFile": "docker-compose.yml",
+    "service": "dev",  // ensure the services in docker-compose uses this name 
+    "workspaceFolder": "/workspace",
+    
+    // Extensions to install INSIDE the container automatically
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-python.python",
+                "tamasfe.even-better-toml" 
+            ],
+            "settings": {
+            // This tells VS Code to look for Poetry environments automatically
+            "python.venvPath": "~/.cache/pypoetry/virtualenvs",
+            "python.terminal.activateEnvironment": true
+        }
+        }
+    },
+    "remoteUser": "vscode"
+}
