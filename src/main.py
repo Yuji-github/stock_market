@@ -5,8 +5,8 @@ import dashboard
 
 
 app.layout = html.Div([
-    login.layout,       # The Login Module
-    dashboard.dashboard_layout    # The Dashboard Module
+    html.Div(login.layout),
+    html.Div(dashboard.dashboard_layout, id='dashboard-container', style={'display': 'none'})
 ])
 
 

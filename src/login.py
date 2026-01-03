@@ -3,12 +3,14 @@ from dash import html, dcc, Input, Output, State, no_update
 from app import app
 from dotenv import load_dotenv
 import os 
+import logging
+
 
 # Configuration
 load_dotenv()  # Load environment variables
 CORRECT_PASSWORD = os.environ.get("DASH_PASSWORD")
 if not CORRECT_PASSWORD:
-    print("WARNING: No DASH_PASSWORD set. Login will fail.")
+    logging.error("ERROR: No DASH_PASSWORD set. Login will fail.")
     exit()
 
 
