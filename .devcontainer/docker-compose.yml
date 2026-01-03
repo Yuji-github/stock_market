@@ -7,7 +7,7 @@ services:
       dockerfile: .devcontainer/Dockerfile.dev
       args:
         USERNAME: vscode
-    
+      
     # Mount the root of the project to /workspace
     volumes:
       - ../:/workspace:cached
@@ -17,4 +17,3 @@ services:
       
     # Set the working directory
     working_dir: /workspace
-

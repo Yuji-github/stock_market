@@ -1,6 +1,6 @@
 # create the docker production when I create the project as a placeholder of dependencies
 # STAGE 1: Builder
-FROM python:3.11-slim as builder
+FROM python:3.12-slim as builder
 
 # Set environment variables for Poetry
 ENV POETRY_NO_INTERACTION=1 \

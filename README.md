@@ -1,6 +1,6 @@
 # General
 ```
-my-aws-project/
+project/
 ├── .devcontainer/              # VS Code Dev Container Config
 │   ├── devcontainer.json       # VS Code settings & extensions
 │   ├── docker-compose.yml      # Orchestrates the dev environment
