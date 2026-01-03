@@ -66,7 +66,7 @@ resource "aws_apprunner_service" "dash_service" {
         # Environment variables for your app
         runtime_environment_variables = {
           ENV = "production"
-          GOOGLE_API_KEY = var.google_api_key 
+          GEMINI_API = var.google_api_key 
           JQUANTS_API = var.jqunats_api_key
           DASH_PASSWORD = var.dash_password
         }

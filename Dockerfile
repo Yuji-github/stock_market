@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Poetry
 RUN pip install poetry
 
-WORKDIR /app
+WORKDIR /workspace
 
 # Copy dependency files
 COPY pyproject.toml poetry.lock ./
@@ -30,16 +30,16 @@ FROM python:3.12-slim as runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PATH="/app/.venv/bin:$PATH"
+    PATH="/workspace/.venv/bin:$PATH"
 
-WORKDIR /app
+WORKDIR /workspace
 
 # Create a non-root user for security
 RUN addgroup --system appgroup && adduser --system --group appuser
 
 # UPDATED: Copy with correct permissions
-COPY --from=builder --chown=appuser:appgroup /app/.venv /app/.venv
-COPY --chown=appuser:appgroup src /app/src
+COPY --from=builder --chown=appuser:appgroup /workspace/.venv /workspace/.venv
+COPY --chown=appuser:appgroup src /workspace/src
 
 # Switch to non-root user
 USER appuser
