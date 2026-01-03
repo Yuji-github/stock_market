@@ -1,4 +1,4 @@
-# create the docker production when I create the project as a placeholder of dependencies
+# Create the docker production when I create the project as a placeholder of dependencies
 # STAGE 1: Builder
 FROM python:3.12-slim as builder
 
@@ -23,14 +23,13 @@ WORKDIR /app
 COPY pyproject.toml poetry.lock ./
 
 # Install dependencies (Production only, no dev deps)
-RUN poetry install --no-dev --no-root
+RUN poetry install --without dev --no-root
 
 # STAGE 2: Runtime (The final image)
-FROM python:3.11-slim as runtime
+FROM python:3.12-slim as runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    # Add the virtual env to PATH so we don't need to prefix 'python'
     PATH="/app/.venv/bin:$PATH"
 
 WORKDIR /app
@@ -38,14 +37,15 @@ WORKDIR /app
 # Create a non-root user for security
 RUN addgroup --system appgroup && adduser --system --group appuser
 
-# Copy the virtual environment from the builder stage
-COPY --from=builder /app/.venv /app/.venv
-
-# Copy application code
-COPY src /app/src
+# UPDATED: Copy with correct permissions
+COPY --from=builder --chown=appuser:appgroup /app/.venv /app/.venv
+COPY --chown=appuser:appgroup src /app/src
 
 # Switch to non-root user
 USER appuser
 
-# Entry point
+# Optional
+EXPOSE 8050
+
+# ENTRY POINT
 CMD ["python", "src/main.py"]
