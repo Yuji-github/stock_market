@@ -1,194 +1,218 @@
 from dash import html, dcc, callback, Input, Output, State, dash_table
 import pandas as pd
-from utils import get_pl_bs_cashflow, calculate_valuation_metrics
-import plotly.express as px
+from utils import (
+    get_pl_bs_cashflow,
+    calculate_valuation_metrics,
+    create_plots,
+    gemini_analysis,
+)
 
 
-df = pd.read_parquet('/workspace/src/edinet_company_list/company_list.parquet')
-df.dropna(subset=['証券コード'], inplace=True)
+df = pd.read_parquet("/workspace/src/edinet_company_list/company_list.parquet")
+df.dropna(subset=["証券コード"], inplace=True)
 data = {
     "industry": df["提出者業種"].to_list(),
     "company_name": df["提出者名"].to_list(),
-    'code': df['証券コード'].to_list(),  # e.g., 72030
-    'yfinance_ticker': df['yfinance_ticker'].to_list()  # e.g., 7203.T
+    "code": df["証券コード"].to_list(),  # e.g., 72030
+    "yfinance_ticker": df["yfinance_ticker"].to_list(),  # e.g., 7203.T
 }
 df = pd.DataFrame(data)
-industry_options = sorted(df['industry'].unique())
+industry_options = sorted(df["industry"].unique())
 
 
-dashboard_layout = html.Div([
-    html.H1("Company Analysis Dashboard"),
-    html.Hr(),
-
-    html.Div([
-        html.Label("1. Select Industry Type(s):"),
-        dcc.Dropdown(
-            id='type-selector',
-            options=[{'label': i, 'value': i} for i in industry_options],
-            multi=True,
-            placeholder="Select type..."
+dashboard_layout = html.Div(
+    [
+        html.H1("Company Analysis Dashboard"),
+        html.Hr(),
+        html.Div(
+            [
+                html.Label("1. Select Industry Type(s):"),
+                dcc.Dropdown(
+                    id="type-selector",
+                    options=[{"label": i, "value": i} for i in industry_options],
+                    multi=True,
+                    placeholder="Select type...",
+                ),
+            ],
+            style={"width": "45%", "display": "inline-block"},
         ),
-    ], style={'width': '45%', 'display': 'inline-block'}),
-
-    html.Div([
-        html.Label("2. Select Company Name(s):"),
-        dcc.Dropdown(
-            id='company-selector',
-            options=[], # Empty initially, populated by callback
-            multi=True,
-            placeholder="Select companies..."
+        html.Div(
+            [
+                html.Label("2. Select Company Name(s):"),
+                dcc.Dropdown(
+                    id="company-selector",
+                    options=[],  # Empty initially, populated by callback
+                    multi=True,
+                    placeholder="Select companies...",
+                ),
+            ],
+            style={"width": "45%", "display": "inline-block", "marginLeft": "20px"},
         ),
-    ], style={'width': '45%', 'display': 'inline-block', 'marginLeft': '20px'}),
-
-    html.Br(), html.Br(),
-    
-    html.Button('Search Data', id='search-btn', n_clicks=0, style={'fontSize': '16px'}),
-
-    html.Hr(),
-
-    # Area to display charts/tables later
-    html.Div(id='dashboard-content')
-])
-
-
-@callback(
-    Output('company-selector', 'options'),
-    Input('type-selector', 'value')
+        html.Br(),
+        html.Br(),
+        html.Button(
+            "Search Data", id="search-btn", n_clicks=0, style={"fontSize": "16px"}
+        ),
+        html.Hr(),
+        # Area to display charts/tables later
+        html.Div(id="dashboard-content"),
+    ]
 )
+
+
+@callback(Output("company-selector", "options"), Input("type-selector", "value"))
 def set_company_options(selected_types):
     if not selected_types:
         # If nothing selected, you can either return [] or all companies.
         return []
-    
+
     # Filter the dataframe based on selected types
-    filtered_df = df[df['industry'].isin(selected_types)]
-    
+    filtered_df = df[df["industry"].isin(selected_types)]
+
     # Get unique companies from the filtered data
-    companies = sorted(filtered_df['company_name'].unique())
-    
-    return [{'label': c, 'value': c} for c in companies]
+    companies = sorted(filtered_df["company_name"].unique())
+
+    return [{"label": c, "value": c} for c in companies]
 
 
 @callback(
-    Output('dashboard-content', 'children'),
-    Input('search-btn', 'n_clicks'),
-    State('type-selector', 'value'),
-    State('company-selector', 'value'),
-    prevent_initial_call=True
+    Output("dashboard-content", "children"),
+    Input("search-btn", "n_clicks"),
+    State("type-selector", "value"),
+    State("company-selector", "value"),
+    prevent_initial_call=True,
 )
 def execute_search(n_clicks, selected_types, selected_companies):
     if n_clicks is None or n_clicks == 0:
         return ""
-        
+
     if not selected_types and not selected_companies:
         return "Please make a selection and click Search."
 
-    selected_comapnies_df = df[df['company_name'].isin(selected_companies)]
-    summary_list = []  # For the main table (Flat data)
-    detailed_data = {} # For plotting charts (Complex data)
-    
+    selected_comapnies_df = df[df["company_name"].isin(selected_companies)]
+    # This list will hold the final HTML blocks for every company
+    company_blocks = []
+
     for _, row in selected_comapnies_df.iterrows():
-        ticker = row['yfinance_ticker']
-        name = row['company_name']
-        
+        ticker = row["yfinance_ticker"]
+        name = row["company_name"]
+        industry = row["industry"]
+
         # Clean ticker for API
-        clean_ticker = ticker.split('.')[0]
+        clean_ticker = ticker.split(".")[0]
 
         pl_data, bs_data, cf_data = get_pl_bs_cashflow(clean_ticker)
         finance_result = {}
         if pl_data and bs_data:
             finance_result = calculate_valuation_metrics(ticker, pl_data, bs_data)
-        
-        summary_record = {
-        'Company Name': name,
-        'Code': finance_result.get('Code', 0),
-        'Price': finance_result.get('Price', 0), 
-        'PER': finance_result.get('PER', 0),
-        'PBR': finance_result.get('PBR', 0),
-        'ROE': finance_result.get('ROE', 0),
-        'ROA': finance_result.get('ROA', 0)
-        }   
-        summary_list.append(summary_record)
 
-        detailed_data[clean_ticker] = {
-        'PL': pl_data if pl_data is not None else [],
-        'BS': bs_data if bs_data is not None else [],
-        'CF': cf_data if cf_data is not None else []
+        this_summary_record = {
+            "Price": finance_result.get("Price", 0),
+            "EquityRatio": finance_result.get("EquityRatio", 0),
+            "PER": finance_result.get("PER", 0),
+            "PBR": finance_result.get("PBR", 0),
+            "ROE": finance_result.get("ROE", 0),
+            "ROA": finance_result.get("ROA", 0),
         }
-        
-    summary_df = pd.DataFrame(summary_list)
-    if summary_df.empty:
-        return html.Div("No data found.", style={'padding': '20px'})
-    
-    data_table = dash_table.DataTable(
-        data=summary_df.to_dict('records'),
-        columns=[{"name": i, "id": i} for i in summary_df.columns],
-        style_table={'overflowX': 'auto'},
-        style_cell={'textAlign': 'left', 'padding': '5px', 'fontSize': '12px'},
-        style_header={'backgroundColor': 'lightgrey', 'fontWeight': 'bold'},
-        page_size=10
-    )
+        this_comapny_df = pd.DataFrame([this_summary_record])
 
-    # all_pl_data = []
-    # for t, data in detailed_data.items():
-    #     all_pl_data.append(data)
-    
-    # if all_pl_data:
-    #     combined_pl = pd.concat(all_pl_data)
-    #     # Note: Replace 'date' and 'totalRevenue' with your ACTUAL column names from yfinance/API
-    #     # We perform a check to ensure columns exist before plotting
-    #     x_col = 'date' if 'date' in combined_pl.columns else combined_pl.columns[0]
-    #     y_col = 'totalRevenue' if 'totalRevenue' in combined_pl.columns else combined_pl.columns[1]
-        
-    #     fig = px.bar(
-    #         combined_pl, 
-    #         x=x_col, 
-    #         y=y_col, 
-    #         color='Ticker', 
-    #         title="Revenue Composition",
-    #         template="plotly_white"
-    #     )
-    #     fig.update_layout(legend=dict(orientation="h", y=-0.2)) # Move legend to bottom
-    # else:
-    #     fig = {} # Empty chart if no data
+        # Note: DataTable styling is often best kept as props for specific cell behavior,
+        # but you can move specific colors/fonts to CSS if preferred.
+        this_metrics_table = dash_table.DataTable(
+            data=this_comapny_df.to_dict("records"),
+            columns=[{"name": i, "id": i} for i in this_comapny_df.columns],
+            style_table={"overflowX": "auto"},
+            style_cell={"textAlign": "center", "padding": "5px", "fontSize": "12px"},
+            style_header={"backgroundColor": "#f1f1f1", "fontWeight": "bold"},
+        )
 
-    # graph_component = dcc.Graph(figure=fig, style={'height': '400px'})
+        # plots
+        plots = create_plots(pl_data, bs_data, cf_data)
 
-    # gemini_mock_text = f"""
-    # ### AI Analysis
-    # **Selected Companies:** {", ".join(selected_companies)}
-    
-    # **Observation:**
-    # Based on the PER and ROE metrics, {summary_df.iloc[0]['Name'] if not summary_df.empty else 'the company'} appears to be leading in efficiency.
-    
-    # **Recommendation:**
-    # Consider investigating the debt-to-equity ratio in the detailed Balance Sheet (BS) data before making a decision.
-    # """
+        def wrap_graph(key):
+            """Helper to wrap graph in dcc.Graph with CSS class"""
+            if key in plots:
+                return dcc.Graph(
+                    figure=plots[key],
+                    config={"displayModeBar": False},
+                    className="chart-wrapper",  # Used CSS class here
+                )
+            return html.Div(
+                [html.P("No data available for this section")], className="no-data-msg"
+            )
 
-    # --- 5. FINAL LAYOUT (The 3 Columns) ---
-    return html.Div([
-        
-        html.H3("Search Results"),
-        
-        html.Div([
-            # Column 1: Table
-            html.Div([
-                html.H5("Summary Metrics"),
-                data_table
-            ], style={'width': '32%', 'display': 'inline-block', 'verticalAlign': 'top', 'paddingRight': '1%'}),
+        pl_content = [wrap_graph("pl_growth"), wrap_graph("pl_efficiency")]
+        bs_content = [wrap_graph("bs_structure"), wrap_graph("bs_safety")]
+        cf_content = [wrap_graph("cf_truth"), wrap_graph("cf_strategy")]
 
-            # Column 2: Plot
-            # html.Div([
-            #     html.H5("Revenue Trend"),
-            #     graph_component
-            # ], style={'width': '34%', 'display': 'inline-block', 'verticalAlign': 'top', 'paddingRight': '1%'}),
+        # Gemini Analysis
+        analysis_component = gemini_analysis(
+            industry, this_summary_record, pl_data, bs_data, cf_data
+        )
 
-            # # Column 3: Analysis
-            # html.Div([
-            #     html.H5("Gemini Insight"),
-            #     html.Div(dcc.Markdown(gemini_mock_text), 
-            #              style={'backgroundColor': '#f4f6f8', 'padding': '15px', 'borderRadius': '5px'})
-            # ], style={'width': '32%', 'display': 'inline-block', 'verticalAlign': 'top'})
-            
-        ], style={'display': 'flex', 'flexDirection': 'row', 'marginTop': '20px'})
-    ])
+        # --- CREATE COMPANY CONTAINER ---
+        company_layout = html.Div(
+            [
+                # --- ROW 1: Title ---
+                html.H3(name, className="company-title"),
+                # --- ROW 2: Metrics (Left) + Tabs (Right) ---
+                html.Div(
+                    [
+                        # Left Col: Metrics
+                        html.Div(
+                            [
+                                html.H5("Key Metrics", className="section-title"),
+                                this_metrics_table,
+                            ],
+                            className="metrics-col",
+                        ),
+                        # Right Col: Plots using Tabs
+                        html.Div(
+                            [
+                                dcc.Tabs(
+                                    [
+                                        dcc.Tab(
+                                            label="Profit & Loss",
+                                            children=pl_content,
+                                            className="custom-tab",
+                                            selected_className="custom-tab--selected",
+                                        ),
+                                        dcc.Tab(
+                                            label="Balance Sheet",
+                                            children=bs_content,
+                                            className="custom-tab",
+                                            selected_className="custom-tab--selected",
+                                        ),
+                                        dcc.Tab(
+                                            label="Cash Flow",
+                                            children=cf_content,
+                                            className="custom-tab",
+                                            selected_className="custom-tab--selected",
+                                        ),
+                                    ]
+                                )
+                            ],
+                            className="plots-col",
+                        ),
+                    ],
+                    className="content-row",
+                ),
+                # --- ROW 3: Gemini Analysis (Bottom) ---
+                html.Div(
+                    [
+                        html.H5("Gemini (Flash) Analysis", className="section-title"),
+                        html.Div(analysis_component, className="gemini-box"),
+                    ],
+                    className="analysis-row",
+                ),
+            ],
+            className="company-card",
+        )  # Main container class
+
+        if not company_layout:
+            return html.Div("No data found for selected companies.")
+
+        company_blocks.append(company_layout)
+
+    # Return the list of all company blocks
+    return html.Div(company_blocks)
