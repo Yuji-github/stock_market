@@ -3,3 +3,10 @@ __pycache__/
 *.pyc
 src/data
 .venv
+
+# Terraform specific ignores
+.terraform/
+*.tfstate
+*.tfstate.backup
+.terraform.lock.hcl
+*.tfvars
