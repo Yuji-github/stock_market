@@ -19,7 +19,7 @@ resource "aws_ecr_repository" "app_repo" {
 # 2. IAM Role (Permission for App Runner to pull images)
 # --------------------------------------------------------
 resource "aws_iam_role" "apprunner_access_role" {
-  name = "AppRunnerECRAccessRole"
+  name = "AppRunnerECRAccessRole-DashWorkspace"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
