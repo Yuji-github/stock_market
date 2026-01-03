@@ -5,14 +5,20 @@ import os
 import requests
 from typing import Tuple, Dict, List, Any, Optional
 import logging
+import time 
 
 
 # Configuration
 load_dotenv()  # Load environment variables
 JQUANTS_API = os.environ.get("JQUANTS_API")
+GEMINI_API = os.environ.get("GEMINI_API")
 if not JQUANTS_API:
     logging.error("ERROR: No JQUANTS_API set.")
     exit()
+
+if not GEMINI_API:
+    logging.warning("Warning: No GEMINI_API set. Disable to analysis using Gemini")
+
 API_URL = "https://api.jquants.com/v2"
 
 
@@ -139,50 +145,55 @@ def get_pl_bs_cashflow(code: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, 
     headers = {"x-api-key": JQUANTS_API}
     params = {"code": code}
     
-    try:
-        res = requests.get(f"{API_URL}/fins/summary", params=params, headers=headers)
-        
-        if res.status_code == 200:
-            d = res.json()
-            data = d.get("data", [])
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            res = requests.get(f"{API_URL}/fins/summary", params=params, headers=headers)
             
-            # Handle Pagination
-            while "pagination_key" in d:
-                params["pagination_key"] = d["pagination_key"]
-                res = requests.get(f"{API_URL}/fins/summary", params=params, headers=headers)
-                if res.status_code != 200:
-                    break
+            if res.status_code == 200:
                 d = res.json()
-                data += d.get("data", [])
-            
-            df = pd.DataFrame(data)
-            
-            if df.empty:
-                return [], [], []
+                data = d.get("data", [])
+                
+                # Handle Pagination
+                while "pagination_key" in d:
+                    params["pagination_key"] = d["pagination_key"]
+                    res = requests.get(f"{API_URL}/fins/summary", params=params, headers=headers)
+                    if res.status_code != 200:
+                        break
+                    d = res.json()
+                    data += d.get("data", [])
+                
+                df = pd.DataFrame(data)
+                
+                if df.empty:
+                    return [], [], []
 
-            # Filter for Consolidated IFRS/JP GAAP if needed. 
-            fy_df = df[df["DocType"] == "FYFinancialStatements_Consolidated_IFRS"]
-            
-            # If filtering resulted in empty data, return empty lists
-            if fy_df.empty:
-                return [], [], []
+                # Filter for Consolidated IFRS/JP GAAP if needed. 
+                fy_df = df[df["DocType"] == "FYFinancialStatements_Consolidated_IFRS"]
+                
+                # If filtering resulted in empty data, return empty lists
+                if fy_df.empty:
+                    return [], [], []
 
-            pl_df = fy_df[pl_cols]
-            bs_df = fy_df[bl_cols]
-            cf_df = fy_df[cf_cols]
+                pl_df = fy_df[pl_cols]
+                bs_df = fy_df[bl_cols]
+                cf_df = fy_df[cf_cols]
+                
+                # Convert to List[Dict] for Dash/JSON compatibility
+                # Example: [{'Sales': 100, 'OP': 10}, ...]
+                return pl_df.to_dict('records'), bs_df.to_dict('records'), cf_df.to_dict('records')
             
-            # Convert to List[Dict] for Dash/JSON compatibility
-            # Example: [{'Sales': 100, 'OP': 10}, ...]
-            return pl_df.to_dict('records'), bs_df.to_dict('records'), cf_df.to_dict('records')
-        
-        else:
-            logging.error(f"J-Quants API Error: {res.status_code}")
-            return [], [], []
-            
-    except Exception as e:
-        logging.error(f"Error fetching data: {e}")
-        return [], [], []
+            else:
+                logging.error(f"J-Quants API Error: {res.status_code}")
+                logging.info(f"Retry in 5 secconds: {attempt+1} / 5")
+                time.sleep(5)
+                
+        except Exception as e:
+            logging.error(f"Error fetching data: {e}")
+            logging.info(f"Retry in 5 secconds: {attempt+1} / 5")
+            time.sleep(5)
 
+    return [], [], []
 
 def calculate_valuation_metrics(
     yf_code: str, 
@@ -232,18 +243,30 @@ def calculate_valuation_metrics(
         return {}
 
     # 3. Get Current Price from yfinance
-    try:
-        ticker = yf.Ticker(yf_code)
-        hist = ticker.history(period="1d")
+    max_retries = 3
+    hist = pd.DataFrame()
+    for attempt in range(max_retries):
+        try:
+            ticker = yf.Ticker(yf_code)
+            hist = ticker.history(period="1d")
+            
+            if hist.empty:
+                logging.warning(f"No price data found for {yf_code}")
+                logging.info(f"Retry in 5 secconds: {attempt+1} / 5")
+                time.sleep(5) 
+            
+            current_price = hist['Close'].iloc[-1]
+            
+        except Exception as e:
+            logging.error(f"yfinance error: {e}")
+            logging.info(f"Retry in 5 secconds: {attempt+1} / 5")
+            time.sleep(5)
         
-        if hist.empty:
-            logging.error(f"No price data found for {yf_code}")
-            return {}
-        
-        current_price = hist['Close'].iloc[-1]
-        
-    except Exception as e:
-        logging.error(f"yfinance error: {e}")
+        if not hist.empty:
+            break 
+    
+    # Failed to get data
+    if hist.empty:
         return {}
 
     # 4. Calculate Metrics
@@ -257,3 +280,21 @@ def calculate_valuation_metrics(
     }
 
     return metrics
+
+
+# def gemini_analysis(summary_record: dict, detailed_data:dict) -> Dict[str]:
+#     if not summary_record or not detailed_data:
+#         return {}
+    
+#     gemini_mock_text = f"""
+#     ### AI Analysis
+#     **Selected Companies:** {", ".join(selected_companies)}
+    
+#     **Observation:**
+#     Based on the PER and ROE metrics, {summary_df.iloc[0]['Name'] if not summary_df.empty else 'the company'} appears to be leading in efficiency.
+    
+#     **Recommendation:**
+#     Consider investigating the debt-to-equity ratio in the detailed Balance Sheet (BS) data before making a decision.
+#     """
+
+#     return {}
