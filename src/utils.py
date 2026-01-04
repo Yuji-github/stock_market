@@ -11,18 +11,26 @@ from plotly.subplots import make_subplots
 from google import genai
 from dash import dcc
 import functools
+import json
+import boto3
+from datetime import datetime
+import uuid
 
 
 # Configuration
 load_dotenv()  # Load environment variables
 JQUANTS_API = os.environ.get("JQUANTS_API")
 GEMINI_API = os.environ.get("GEMINI_API")
+BUCKET_NAME = os.environ.get("S3_BUCKET_NAME")
 if not JQUANTS_API:
     logging.error("ERROR: No JQUANTS_API set.")
     exit()
 
 if not GEMINI_API:
     logging.warning("Warning: No GEMINI_API set. Disable to analysis using Gemini")
+
+if not BUCKET_NAME:
+    logging.warning("Warning: S3_BUCKET_NAME not set. Skipping S3 saving.")
 
 API_URL = "https://api.jquants.com/v2"
 GEMINI_MODELS = ['gemini-3-flash-preview', 'gemini-2.5-flash-lite', 'gemini-2.5-flash']  # 60 requests per day
@@ -635,6 +643,51 @@ def format_data_for_prompt(
     return text_table
 
 
+def save_to_s3(prompt: str, response_text: str,  industry: str,
+    # summary_record: Dict[str, Any],
+    # pl_data: List[Dict[str, Any]],
+    # bs_data: List[Dict[str, Any]],
+    # cf_data: List[Dict[str, Any]],
+    user_id: uuid
+    ):
+    """Saves the prompt and response to S3 for audit/logging."""
+    if not BUCKET_NAME:
+        return
+    
+    try:
+        # Create a unique filename: logs/2024-01-01/uuid.json
+        timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        request_id = str(uuid.uuid4())[:8]
+        file_key = f"stock_market/{user_id}/{timestamp}_{request_id}.json"
+
+        # Prepare data
+        log_data = {
+            "user_id": user_id,
+            "timestamp": datetime.now().isoformat(),
+            "prompt": prompt,
+            "response": response_text,
+            "industry": industry,
+            # "summary": summary_record,
+            # "pl_data": pl_data,
+            # "bs_data": bs_data,
+            # "cf_data": cf_data
+        }
+
+        # Upload
+        s3 = boto3.client('s3')
+        s3.put_object(
+            Bucket=BUCKET_NAME,
+            Key=file_key,
+            Body=json.dumps(log_data, ensure_ascii=False),
+            ContentType='application/json'
+        )
+        logging.info(f"Successfully logged to s3://{BUCKET_NAME}/{file_key}")
+
+    except Exception as e:
+        # Never crash the app just because logging failed
+        logging.error(f"Failed to upload to S3: {str(e)}")
+
+
 @functools.lru_cache(maxsize=128)
 def get_gemini_response_rotated(prompt: str) -> str:
     """
@@ -697,6 +750,7 @@ def gemini_analysis(
     pl_data: List[Dict[str, Any]],
     bs_data: List[Dict[str, Any]],
     cf_data: List[Dict[str, Any]],
+    user_id: uuid
 ) -> dcc.Markdown:
     """
     Constructs a prompt with financial data, sends it to the Gemini API,
@@ -713,11 +767,14 @@ def gemini_analysis(
         dcc.Markdown: A Dash component containing the formatted AI analysis
                       or an error message if the API call fails.
     """
-    if not summary_record and not pl_data and not bs_data and not cf_data:
-        return dcc.Markdown("No Data")
-
+    save_to_s3("Test", "EKO", "industry", user_id)
+    exit()
+    
     if not GEMINI_API:
         return dcc.Markdown("No Gemini API Key. No Gemini Analysis Applied")
+    
+    if not summary_record and not pl_data and not bs_data and not cf_data:
+        return dcc.Markdown("No Data")
 
     pl_text = format_data_for_prompt(
         pl_data,

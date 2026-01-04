@@ -27,30 +27,39 @@ layout = html.Div(
         ),
         html.Button("Login", id="login-button", n_clicks=0),
         dcc.Loading(
-            id="loading-spinner", type="default", children=html.Div(id="login-alert")
+            id="loading-spinner", 
+            type="default", 
+            children=html.Div(id="login-alert", style={"color": "red", "marginTop": "10px"})
         ),
     ],
+    style={"textAlign": "center", "marginTop": "100px"} 
 )
 
 
 @app.callback(
     [
-        Output("login-container", "style"),
-        Output("dashboard-container", "style"),
-        Output("login-alert", "children"),
+        Output("url", "pathname"),         # Target 1: The URL component in main.py
+        Output("login-alert", "children"), # Target 2: The error message
     ],
-    [Input("login-button", "n_clicks"), Input("password-input", "n_submit")],
+    [
+        Input("login-button", "n_clicks"), 
+        Input("password-input", "n_submit")
+    ],
     [State("password-input", "value")],
     prevent_initial_call=True,
 )
 def verify_password(n_clicks, n_submit, password):
+    # Check if triggered by actual user interaction
     if not password:
-        return no_update, no_update, "Please enter a password."
+        return no_update, "Please enter a password."
 
     if password == CORRECT_PASSWORD:
-        # Success: Hide Login, Show Dashboard
-        return {"display": "none"}, {"display": "block"}, ""
+        # SUCCESS:
+        # Change the URL to '/dashboard'. 
+        # The callback in main.py will detect this and swap the layout.
+        return "/dashboard", ""
     else:
-        time.sleep(3)  # to avoid million attack from hackers
-        # Fail: Keep Login, Ensure Dashboard hidden, Show Error
-        return {}, {"display": "none"}, "Incorrect Password. Please wait..."
+        # FAILURE:
+        time.sleep(2)  # Delay to slow down brute-force attacks
+        # Do NOT update the URL (no_update), just show the error.
+        return no_update, "Incorrect Password. Please try again."

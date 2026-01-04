@@ -20,7 +20,7 @@ df = pd.DataFrame(data)
 industry_options = sorted(df["industry"].unique())
 
 
-dashboard_layout = html.Div(
+layout = html.Div(
     [
         html.H1("Company Analysis Dashboard"),
         html.Hr(),
@@ -79,15 +79,20 @@ def set_company_options(selected_types):
     Output("dashboard-content", "children"),
     Input("search-btn", "n_clicks"),
     State("type-selector", "value"),
+    State('user-id-store', 'data'),
     State("company-selector", "value"),
     prevent_initial_call=True,
 )
-def execute_search(n_clicks, selected_types, selected_companies):
+def execute_search(n_clicks, selected_types, user_id, selected_companies):
     if n_clicks is None or n_clicks == 0:
         return ""
 
     if not selected_types and not selected_companies:
         return "Please make a selection and click Search."
+    
+    if not user_id:
+        # Fallback if something went wrong (rare)
+        user_id = "unknown_user"
 
     selected_comapnies_df = df[df["company_name"].isin(selected_companies)]
     # This list will hold the final HTML blocks for every company
@@ -147,7 +152,7 @@ def execute_search(n_clicks, selected_types, selected_companies):
 
         # Gemini Analysis
         analysis_component = gemini_analysis(
-            industry, this_summary_record, pl_data, bs_data, cf_data
+            industry, this_summary_record, pl_data, bs_data, cf_data, user_id
         )
 
         # --- CREATE COMPANY CONTAINER ---

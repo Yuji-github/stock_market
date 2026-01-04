@@ -42,7 +42,59 @@ resource "aws_iam_role_policy_attachment" "apprunner_access_policy" {
 }
 
 # --------------------------------------------------------
-# 3. App Runner Service (The actual running app)
+# 3. S3 
+# --------------------------------------------------------
+resource "aws_s3_bucket" "stock_market_bucket" {
+  bucket_prefix = "dash-app-stock-market-data" 
+}
+
+# Create the Instance Role (For the running app)
+resource "aws_iam_role" "apprunner_instance_role" {
+  name = "AppRunnerInstanceRole-DashApp"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "tasks.apprunner.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+# Create Policy to Allow S3 Write
+resource "aws_iam_policy" "s3_write_policy" {
+  name        = "AppRunnerS3WritePolicy"
+  description = "Allow App Runner to write logs to S3"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "s3:PutObject",
+          "s3:ListBucket"
+        ]
+        Effect   = "Allow"
+        Resource = [
+          aws_s3_bucket.stock_market_bucket.arn,
+          "${aws_s3_bucket.stock_market_bucket.arn}/*"
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "attach_s3_policy" {
+  role       = aws_iam_role.apprunner_instance_role.name
+  policy_arn = aws_iam_policy.s3_write_policy.arn
+}
+# --------------------------------------------------------
+# 4. App Runner Service (The actual running app)
 # --------------------------------------------------------
 resource "aws_apprunner_service" "dash_service" {
   service_name = "dash-workspace-service"
@@ -69,6 +121,7 @@ resource "aws_apprunner_service" "dash_service" {
           GEMINI_API = var.google_api_key 
           JQUANTS_API = var.jqunats_api_key
           DASH_PASSWORD = var.dash_password
+          S3_BUCKET_NAME = aws_s3_bucket.stock_market_bucket.bucket
         }
       }
     }
@@ -79,8 +132,10 @@ resource "aws_apprunner_service" "dash_service" {
   instance_configuration {
     cpu    = "1024" # 1 vCPU
     memory = "2048" # 2 GB
+    instance_role_arn = aws_iam_role.apprunner_instance_role.arn
   }
 }
+
 
 # --------------------------------------------------------
 # Outputs
@@ -91,4 +146,9 @@ output "ecr_repo_url" {
 
 output "app_runner_url" {
   value = aws_apprunner_service.dash_service.service_url
+}
+
+output "s3_bucket_name" {
+  value       = aws_s3_bucket.stock_market_bucket.bucket
+  description = "The actual name of the created S3 bucket"
 }
