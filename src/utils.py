@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from google import genai
 from dash import dcc
+import functools
 
 
 # Configuration
@@ -24,6 +25,7 @@ if not GEMINI_API:
     logging.warning("Warning: No GEMINI_API set. Disable to analysis using Gemini")
 
 API_URL = "https://api.jquants.com/v2"
+GEMINI_MODELS = ['gemini-3-flash-preview', 'gemini-2.5-flash-lite', 'gemini-2.5-flash']  # 60 requests per day
 sleep_time = 3
 
 
@@ -235,12 +237,12 @@ def get_pl_bs_cashflow(
                 )
             else:
                 logging.error(f"J-Quants API Error: {res.status_code}")
-                logging.warning(f"Retry in {sleep_time} secconds: {attempt+1} / 5")
+                logging.warning(f"Retry in {sleep_time} secconds: {attempt+1} / {max_retries}")
                 time.sleep(sleep_time)
 
         except Exception as e:
             logging.error(f"Error fetching data: {e}")
-            logging.warning(f"Retry in {sleep_time} secconds: {attempt+1} / 5")
+            logging.warning(f"Retry in {sleep_time} secconds: {attempt+1} / {max_retries}")
             time.sleep(sleep_time)
 
     return [], [], []
@@ -319,43 +321,40 @@ def calculate_valuation_metrics(
 
     # 3. Get Current Price from yfinance
     max_retries = 3
+    current_price = 0
     hist = pd.DataFrame()
     for attempt in range(max_retries):
         try:
             ticker = yf.Ticker(yf_code)
-            hist = ticker.history(period="1d")
+            hist = ticker.history(period="5d")
 
             if hist.empty:
                 logging.warning(f"No price data found for {yf_code}")
-                logging.warning(f"Retry in {sleep_time} secconds: {attempt+1} / 5")
+                logging.warning(f"Retry in {sleep_time} secconds: {attempt+1} / {max_retries}")
                 time.sleep(sleep_time)
 
             current_price = hist["Close"].iloc[-1]
 
         except Exception as e:
             logging.error(f"yfinance error: {e}")
-            logging.warning(f"Retry in {sleep_time} secconds: {attempt+1} / 5")
+            logging.warning(f"Retry in {sleep_time} secconds: {attempt+1} / {max_retries}")
             time.sleep(sleep_time)
 
-        if not hist.empty:
+        if current_price > 0:
             break
-
-    # Failed to get data
-    if hist.empty:
-        return {}
 
     # 4. Calculate Metrics
     metrics = {
         "Code": yf_code.split(".")[0],
-        "Price": current_price,
+        "Price": current_price if current_price > 0 else None,
         "EquityRatio": (
             round((equity_latest / ta_latest) * 100, 1) if ta_latest > 0 else None
         ),
-        "PBR": round(current_price / bps, 2) if bps > 0 else None,
+        "PBR": round(current_price / bps, 2) if bps > 0 and current_price > 0 else None,
     }
 
     if is_annual_data:
-        metrics["PER"] = round(current_price / eps, 2) if eps > 0 else None
+        metrics["PER"] = round(current_price / eps, 2) if eps > 0 and current_price > 0 else None
         metrics["ROE"] = (
             round((np_val / equity_latest) * 100, 2) if equity_latest > 0 else None
         )
@@ -631,8 +630,65 @@ def format_data_for_prompt(
         available_cols = ["CurPerEn"] + [c for c in available_cols if c != "CurPerEn"]
 
     # Convert to string (CSV style is token-efficient)
+    df = df[df["DocType"] != 'EarnForecastRevision']  # to remove EarnForecastRevision
     text_table = df[available_cols].to_string(index=False)
     return text_table
+
+
+@functools.lru_cache(maxsize=128)
+def get_gemini_response_rotated(prompt: str) -> str:
+    """
+    Sends a prompt to the Google Gemini API, rotating through available models 
+    to handle rate limits (429) and quotas, with result caching.
+
+    This function iterates through the global `GEMINI_MODELS` list. If a model fails 
+    due to quota exhaustion (429 error) or resource exhaustion, it automatically 
+    attempts the next model in the priority list. It effectively aggregates the 
+    daily quotas of multiple models.
+
+    Args:
+        prompt (str): The text prompt to send to the AI model.
+
+    Returns:
+        str: The generated text response from the AI. 
+             Returns a formatted error message string if all models fail or 
+             if a non-recoverable error (like a network issue) occurs.
+
+    Note:
+        - Decorated with `@lru_cache`: Repeated identical calls return instantly without API usage.
+        - Enforces a 2-second sleep before requests to prevent hitting 
+          Requests Per Minute (RPM) limits on the Free tier.
+    """
+    last_error = ""
+
+    for model_name in GEMINI_MODELS:
+        try:
+            client = genai.Client(api_key=GEMINI_API)
+
+            # Add a tiny delay to respect the tight RPM (Requests Per Minute)
+            time.sleep(2) 
+            
+            client = genai.Client(api_key=GEMINI_API)
+            response = client.models.generate_content(
+                model=model_name, 
+                contents=prompt
+            )
+            client.close()
+            return response.text
+
+        except Exception as e:
+            error_msg = str(e)
+            # Check for Quota (429) or Resource Exhausted
+            if "429" in error_msg or "quota" in error_msg.lower() or "resource" in error_msg.lower():
+                print(f"⚠️ Quota hit on {model_name}. Switching to next...")
+                last_error = error_msg
+                continue # Try the next model in the list
+            else:
+                # If it's a different error (e.g., Internet down), stop immediately
+                return f"**API Error:** {error_msg}"
+
+    # Loop through ALL models and they all fail:
+    return f"**Daily Limit Reached:** All 3 models exhausted (60/60 requests used). \nLast error: {last_error}"
 
 
 def gemini_analysis(
@@ -686,7 +742,12 @@ def gemini_analysis(
     {cf_text}
 
     ### 4. (Current Stock) Price, EquityRatio, PER, PBR, ROE, ROA
-    {summary_record}
+    Stock Price: {summary_record['Price'] if summary_record['Price'] is not None else "None"}
+    EquityRatio: {summary_record['EquityRatio'] if summary_record['EquityRatio'] is not None else "None"}
+    PER: {summary_record['PER'] if summary_record['PER'] is not None else "None"}
+    PBR: {summary_record['PBR'] if summary_record['PBR'] is not None else "None"}
+    ROE: {summary_record['ROE'] if summary_record['ROE'] is not None else "None"}
+    ROA: {summary_record['ROA'] if summary_record['ROA'] is not None else "None"}
 
     ### Instructions:
     Please provide a concise analysis in markdown format with the following sections in Japanese:
@@ -699,17 +760,6 @@ def gemini_analysis(
 
     *Keep it objective and professional. Do not give financial advice, just analysis.*
     """
-
-    try:
-        client = genai.Client(api_key=GEMINI_API)
-        response = client.models.generate_content(
-            model="gemini-3-flash-preview", contents=prompt
-        )
-        ai_text = response.text
-
-        client.close()
-        # return the Markdown component directly
-        return dcc.Markdown(ai_text, style={"lineHeight": "1.6"})
-
-    except Exception as e:
-        return dcc.Markdown(f"**AI Analysis Failed:** {str(e)}")
+    ai_text = get_gemini_response_rotated(prompt)
+    
+    return dcc.Markdown(ai_text, style={"lineHeight": "1.6"})
