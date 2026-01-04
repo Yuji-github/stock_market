@@ -644,13 +644,31 @@ def format_data_for_prompt(
 
 
 def save_to_s3(prompt: str, response_text: str,  industry: str,
-    # summary_record: Dict[str, Any],
-    # pl_data: List[Dict[str, Any]],
-    # bs_data: List[Dict[str, Any]],
-    # cf_data: List[Dict[str, Any]],
-    user_id: uuid
+    summary_record: Dict[str, Any],
+    pl_data: List[Dict[str, Any]],
+    bs_data: List[Dict[str, Any]],
+    cf_data: List[Dict[str, Any]],
+    user_id: str
     ):
-    """Saves the prompt and response to S3 for audit/logging."""
+    """
+    Asynchronously uploads the AI analysis context and results to an S3 bucket for audit logging.
+
+    This function serializes the input data into a JSON file and uploads it to S3 
+    using a directory structure organized by user_id.
+
+    Args:
+        prompt (str): The raw text prompt sent to the Gemini API.
+        response_text (str): The raw text response received from the Gemini API.
+        industry (str): The industry sector of the target company.
+        summary_record (Dict[str, Any]): Dictionary containing key financial metrics (PER, PBR, etc.).
+        pl_data (List[Dict[str, Any]]): List of Profit & Loss historical records.
+        bs_data (List[Dict[str, Any]]): List of Balance Sheet historical records.
+        cf_data (List[Dict[str, Any]]): List of Cash Flow historical records.
+        user_id (str): The unique identifier (UUID) of the user initiating the request.
+
+    Returns:
+        None: Errors are logged to the standard error stream but do not raise exceptions.
+    """
     if not BUCKET_NAME:
         return
     
@@ -660,17 +678,24 @@ def save_to_s3(prompt: str, response_text: str,  industry: str,
         request_id = str(uuid.uuid4())[:8]
         file_key = f"stock_market/{user_id}/{timestamp}_{request_id}.json"
 
-        # Prepare data
+        # Prepare payload
         log_data = {
-            "user_id": user_id,
-            "timestamp": datetime.now().isoformat(),
-            "prompt": prompt,
-            "response": response_text,
-            "industry": industry,
-            # "summary": summary_record,
-            # "pl_data": pl_data,
-            # "bs_data": bs_data,
-            # "cf_data": cf_data
+            "meta": {
+                "user_id": user_id,
+                "timestamp": datetime.now().isoformat(),
+                "request_id": request_id,
+                "industry": industry
+            },
+            "gemini_interaction": {
+                "prompt": prompt,
+                "response": response_text
+            },
+            "financial_data": {
+                "summary": summary_record,
+                "pl_data": pl_data,
+                "bs_data": bs_data,
+                "cf_data": cf_data
+            }
         }
 
         # Upload
@@ -678,7 +703,7 @@ def save_to_s3(prompt: str, response_text: str,  industry: str,
         s3.put_object(
             Bucket=BUCKET_NAME,
             Key=file_key,
-            Body=json.dumps(log_data, ensure_ascii=False),
+            Body=json.dumps(log_data, ensure_ascii=False, default=str),
             ContentType='application/json'
         )
         logging.info(f"Successfully logged to s3://{BUCKET_NAME}/{file_key}")
@@ -750,7 +775,7 @@ def gemini_analysis(
     pl_data: List[Dict[str, Any]],
     bs_data: List[Dict[str, Any]],
     cf_data: List[Dict[str, Any]],
-    user_id: uuid
+    user_id: str
 ) -> dcc.Markdown:
     """
     Constructs a prompt with financial data, sends it to the Gemini API,
@@ -766,10 +791,7 @@ def gemini_analysis(
     Returns:
         dcc.Markdown: A Dash component containing the formatted AI analysis
                       or an error message if the API call fails.
-    """
-    save_to_s3("Test", "EKO", "industry", user_id)
-    exit()
-    
+    """    
     if not GEMINI_API:
         return dcc.Markdown("No Gemini API Key. No Gemini Analysis Applied")
     
@@ -818,5 +840,7 @@ def gemini_analysis(
     *Keep it objective and professional. Do not give financial advice, just analysis.*
     """
     ai_text = get_gemini_response_rotated(prompt)
+    
+    save_to_s3(prompt, ai_text, industry, summary_record, pl_data, bs_data, cf_data, user_id)
     
     return dcc.Markdown(ai_text, style={"lineHeight": "1.6"})
